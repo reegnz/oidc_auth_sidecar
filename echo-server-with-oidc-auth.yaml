@@ -1,0 +1,74 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: echo-server
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oauth2-proxy-config
+  namespace: echo-server
+data:
+  OAUTH2_PROXY_PROVIDER: oidc
+  OAUTH2_PROXY_OIDC_ISSUER_URL: https://kubernetes.default.svc.cluster.local
+  OAUTH2_PROXY_PROVIDER_CA_FILES: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+  OAUTH2_PROXY_CLIENT_ID: echo-server.echo-server.svc.cluster.local # acts as the accepted audience
+  OAUTH2_PROXY_CLIENT_SECRET: dummy # not used 
+  OAUTH2_PROXY_COOKIE_SECRET: 34BjK3e7NUO3EOkEcuttHqyJV9xUPz0yudOxYd5GDeE= # not used
+  OAUTH2_PROXY_SKIP_JWT_BEARER_TOKENS: "true"
+  OAUTH2_PROXY_EMAIL_DOMAINS: "*" # must be wildcard for kubernetes machine users as there's no email claim
+  OAUTH2_PROXY_OIDC_GROUPS_CLAIM: sub # sub claim will be the group of the caller
+  OAUTH2_PROXY_ALLOWED_GROUPS: system:serviceaccount:default:oidc-test # list of service accounts allowed to access service
+  OAUTH2_PROXY_STANDARD_LOGGING: "true"
+  OAUTH2_PROXY_AUTH_LOGGING: "true"
+  OAUTH2_PROXY_REQUEST_LOGGING: "true"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name:  echo-server
+  namespace: echo-server
+  labels:
+    app.kubernetes.io/name:  echo-server
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name:  echo-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name:  echo-server
+    spec:
+      containers:
+      - name: oauth2-proxy
+        image: bitnami/oauth2-proxy:7.4.0
+        env:
+        - name: OAUTH2_PROXY_UPSTREAMS
+          value: 127.0.0.1:8080 # upstream points to main pod
+        envFrom:
+        - configMapRef:
+            name: oauth2-proxy-config
+        ports:
+        - name: http
+          containerPort: 4180 # oauth2-proxy binds to this port by default
+      - name:  echo-server
+        image: ealen/echo-server:0.6.0
+        env:
+        - name: PORT
+          value: '8080'
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-server
+  namespace: echo-server
+spec:
+  selector:
+    app.kubernetes.io/name:  echo-server
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
